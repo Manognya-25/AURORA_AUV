@@ -1,0 +1,556 @@
+# =============================================================================
+# AUV PROJECT - MASTER CONFIGURATION FILE
+# =============================================================================
+# This file centralizes all tunable parameters for the project so that no
+# module hard-codes values. Each week adds new sections as new modules are
+# implemented. Sections for future weeks are included now (with sensible
+# placeholder values) so the structure stays stable as the project grows.
+#
+# NOTE (Week 1): Only "project" and "environment" sections are actively used
+# right now. Everything else is a placeholder for upcoming weeks and is
+# clearly marked.
+# =============================================================================
+
+project:
+  name: "AI-Powered Autonomous Underwater Vehicle (AUV) Simulation"
+  version: "0.1.0"
+  stage: "Week 2 - Bathymetry Data Processing"
+  random_seed: 42          # Used everywhere for reproducibility
+
+# -----------------------------------------------------------------------------
+# ENVIRONMENT / BATHYMETRY SETTINGS  (used starting Week 2)
+# -----------------------------------------------------------------------------
+environment:
+  grid_size:
+    rows: 100
+    cols: 100
+  depth_units: "meters"
+  data_source: "synthetic"      # options: "synthetic" | "real"
+  raw_data_path: "data/raw/"
+  processed_data_path: "data/processed/"
+  synthetic_data_path: "data/synthetic/"
+
+  # Spatial resolution: how many real-world meters one grid cell represents.
+  # This is a SIMULATION ASSUMPTION, not a claim about a real surveyed area.
+  resolution: 1.0     # 1 grid cell = 1.0 meter
+
+  synthetic_generation:
+    base_depth: 50.0            # average sea-floor depth in meters
+    gradient_strength: 0.4      # smooth gradient contribution
+    num_hills: 3                # Gaussian hills (shallow mounds)
+    num_depressions: 2          # Gaussian depressions (trenches/pits)
+    num_ridges: 2                # elongated ridge features
+    noise_std: 1.5               # random noise standard deviation
+    seed: 42                     # reproducibility (falls back to project.random_seed if unset)
+
+  # ---- Phase 4: procedural underwater scenarios (src/simulation/world_generator.py) --------------
+  # scenario: legacy_week4 (default) reproduces the Phase 1-3 world from data/processed/*.npy exactly.
+  # Procedural: open_terrain | sparse_obstacles | dense_obstacles | narrow_corridor |
+  #             terrain_variation | mixed_terrain_obstacles | mapping_validation
+  # Same scenario + seed + config -> identical world; a different seed -> a different world.
+  scenario: legacy_week4
+  seed: 42
+  min_seabed_clearance_m: 2.0    # the generated seabed must stay at least this far below the shallowest mission z
+  # seabed: {type: rolling, variation_m: 1.5, roughness_m: 0.05}      # optional overrides of the scenario preset
+  # obstacles: {count: 8, min_size_m: 1.0, max_size_m: 3.0, clearance_m: 3.0, path_clearance_m: 3.0}
+
+# -----------------------------------------------------------------------------
+# BATHYMETRY DATA PROCESSING (Week 2)
+# -----------------------------------------------------------------------------
+bathymetry:
+  # "synthetic" generates terrain procedurally. "real" loads from raw_input_path.
+  source: "synthetic"          # options: "synthetic" | "real"
+  raw_input_path: null          # e.g. "data/raw/my_survey.csv" when source = "real"
+
+  # Depth sign convention. This MUST be explicit — never assumed silently.
+  #   "positive_down" -> larger positive value = deeper water (0 = surface)
+  #   "negative_down"  -> larger negative value = deeper water (elevation-style, 0 = surface)
+  # All internal processing converts to "positive_down" for consistency;
+  # see docs/dataset.md for full explanation.
+  depth_convention: "positive_down"
+
+  # Missing-value interpolation strategy: "nearest" | "linear" | "median"
+  interpolation_method: "linear"
+
+  # Conservative outlier detection (does NOT auto-modify data unless enabled)
+  outlier_detection:
+    enabled: true
+    method: "zscore"        # values with |z| > threshold are flagged
+    zscore_threshold: 4.0
+    auto_filter: false        # if false, outliers are only reported, not changed
+
+  # Optional normalization of a SEPARATE copy of the depth grid.
+  # The raw/cleaned depth grid is never overwritten.
+  normalize: false
+  normalization_method: "minmax"   # options: "minmax" | "standardize"
+
+output:
+  processed_dir: "data/processed"
+  synthetic_dir: "data/synthetic"
+  figures_dir: "results/figures"
+
+# -----------------------------------------------------------------------------
+# TERRAIN FEATURE EXTRACTION & CLASSIFICATION (used starting Week 3)
+# -----------------------------------------------------------------------------
+terrain:
+  features: ["depth", "slope", "roughness", "curvature"]
+  roughness_window: 3           # local window size (cells) for roughness/std-dev
+  classes:
+    0: "Flat/Sand"
+    1: "Rocky"
+    2: "Steep/Terrain Hazard"
+    3: "Obstacle"
+  # Thresholds used ONLY to generate SYNTHETIC training labels
+  # (clearly not real geological survey labels — see docs/dataset.md)
+  #
+  # RECALIBRATED in Week 3 (values only — keys/semantics unchanged).
+  # Original values (0.15 / 0.35 / 2.5) were placeholders written before any
+  # feature statistics existed. Measured on the actual Week 2 output
+  # (data/processed/processed_bathymetry.npy, resolution=1.0 m/cell):
+  #   slope magnitude:  min 0.0095, max 7.98, mean 1.82
+  #   roughness (w=3):  min 0.34,   max 4.47, mean 1.72
+  # At the original values, 96.7% of cells fell into Steep/Obstacle — a
+  # degenerate, unusable label distribution. New values were chosen via a
+  # percentile search over the real grid to give a non-degenerate 4-class
+  # split (see docs/terrain_classification.md for the full derivation):
+  #   Flat/Sand ~49%, Rocky ~23%, Steep/Terrain Hazard ~23%, Obstacle ~5%.
+  synthetic_label_thresholds:
+    slope_rocky: 1.65
+    slope_steep: 2.35
+    roughness_obstacle: 2.8
+  train_split: 0.70
+  val_split: 0.15
+  test_split: 0.15
+  model_path: "models/terrain_classifier.pkl"
+  classifier:
+    type: "RandomForestClassifier"
+    n_estimators: 200
+    max_depth: null
+
+# -----------------------------------------------------------------------------
+# OCCUPANCY GRID & COST MAP (used starting Week 4)
+# -----------------------------------------------------------------------------
+mapping:
+  occupancy_values:
+    free: 0
+    obstacle: 1
+    unknown: 2
+  # Safety buffer grown around every Obstacle cell before path planning,
+  # in grid cells (cells * environment.resolution = metres). Approximates
+  # the AUV's physical half-width plus a margin for localization error.
+  # ADDED in Week 4 (not present in the Week 1-3 config): no prior module
+  # needed a spatial safety margin, so there was nothing to configure yet.
+  safety_inflation_radius_cells: 2
+  cost_weights:
+    w_depth: 0.2
+    w_slope: 0.4
+    w_roughness: 0.3
+    w_obstacle: 1000000   # effectively "infinite" cost for blocked cells
+  unknown_cell_cost: 50    # configurable high cost for unexplored cells
+
+  # ---- Phase 4: ONLINE sonar mapping (read by src/mapping/map_types.MapConfig) --------------------
+  # The keys above are the offline Week-4 pipeline and are not used online. Everything below is a
+  # SIMULATION parameter, not a calibration of any real sonar or vehicle.
+  # Map frame == world frame. The grid is a horizontal slice; array[row, col], col<->X, row<->Y,
+  # origin = world (x, y) of the lower-left CORNER of cell (0, 0). See docs/mapping.md.
+  enabled: true                    # false -> no mapper is created, Phase 3 behaviour exactly
+  update_rate_hz: 5.0              # max map-update rate (sonar itself is sampled at sensors.sonar.rate_hz)
+  resolution_m: 0.25
+  width_m: 60.0                    # extent along world X
+  height_m: 60.0                   # extent along world Y
+  origin_x_m: -5.0
+  origin_y_m: -5.0
+  occupied_threshold: 0.7          # P(occ) >= this -> OCCUPIED
+  free_threshold: 0.3              # P(occ) <= this -> FREE; in between -> UNKNOWN
+  log_odds_occupied: 1.0           # added to a cell on a sonar hit
+  log_odds_free: -0.5              # added to a cell a valid ray passed through
+  log_odds_min: -4.0               # clamp (P ~ 0.018) so cells stay revisable
+  log_odds_max: 4.0                # clamp (P ~ 0.982)
+  max_update_range_m: 30.0         # rays are never integrated beyond this distance
+  slice_half_height_m: 1.0         # only ray segments within +/- this of the ESTIMATED z update the 2-D map
+  no_return_free_weight: 0.5       # weight of free-space evidence from a valid ray without a detection
+  max_pose_age_s: 0.1              # reject a scan if the EKF estimate time differs from the scan time by more
+  cost_update_every_n: 1           # recompute the navigation cost map every N map updates
+  obstacle:
+    vehicle_radius_m: 0.35         # circular footprint approximation (hull is 1.5 m x 0.5 m)
+    safety_margin_m: 0.25          # inflation radius = vehicle_radius_m + safety_margin_m
+  costs:
+    free: 1
+    unknown: 50
+    occupied: 1000
+    inflated: 500                  # inside the inflation radius (not traversable)
+    unknown_policy: cost           # "cost": traversable at `unknown` cost | "blocked": not traversable
+    clearance_weight: 10           # extra cost at the inflation boundary, decaying linearly to 0
+    clearance_decay_m: 1.5         # distance beyond the inflation radius over which it decays
+    high_cost_threshold: 20
+  terrain_risk:                    # optional a-priori bathymetry risk layer (pre-dive chart), NOT sensor data
+    enabled: false
+    weight: 5.0
+    class_risk: {0: 0.0, 1: 0.4, 2: 0.8, 3: 0.0}   # Obstacle class = 0 so the prior cannot leak obstacle locations
+
+# -----------------------------------------------------------------------------
+# PYBULLET AUV SIMULATION (used starting Week 5)
+# -----------------------------------------------------------------------------
+simulation:
+  # WEEK 5: this section was a placeholder through Week 4 (urdf_path,
+  # gravity, time_step, drag_coefficient, start/goal position, velocity
+  # limits, and a PID controller stub). It is now filled in for real.
+  # drag_coefficient/PID(kp,ki,kd) are SUPERSEDED by physics.linear_drag/
+  # angular_drag and the P-controller block below -- a full PID (with
+  # integral/derivative terms) is left for Week 9's adaptive controller,
+  # per the Week 5 spec ("do not implement MPC/advanced control yet").
+  urdf_path: "assets/auv/auv.urdf"
+  mode: "DIRECT"          # "GUI" for interactive demos, "DIRECT" for tests/automation
+  gui: false               # alias for mode -- true == "GUI", false == "DIRECT"
+  gravity: -9.8
+  time_step: 0.01
+  max_steps: 20000
+  start_position: [5, 5, -5]
+  goal_position: [20, 20, -5]
+  # Manually-defined waypoint sequence (STEP 6/9): START -> waypoints -> GOAL.
+  # Each was checked against data/processed/occupancy_grid_inflated.npy and
+  # confirmed to fall in free space (see docs/simulation.md section 6).
+  # This is NOT path planning -- Week 6's A* will replace this hand-picked list.
+  waypoints:
+    - [12, 12, -5]
+    - [20, 20, -5]   # == goal_position; the goal is always the final waypoint
+  max_linear_velocity: 2.0
+  max_angular_velocity: 1.0
+
+  # World geometry derived from the Week 4 grid (see docs/simulation.md
+  # section 6). seabed_z is the depth of the seabed floor; obstacles are
+  # extruded as full water-column pillars from the seabed up to just below
+  # the surface, since the 2D occupancy grid has no per-cell height data.
+  seabed_z: -15.0
+  obstacle_height: 14.0
+  bounds_margin: 1.0      # metres of slack beyond the grid extent before "out of bounds"
+
+  auv:
+    mass: 20.0             # kg
+    length: 1.5            # m
+    radius: 0.25           # m
+    # NOTE: keep in sync with assets/auv/auv.urdf if you change these --
+    # URDF cannot read this file, so the geometry is duplicated there.
+
+  physics:
+    water_density: 1000.0  # kg/m^3
+    # buoyancy_ratio calibrated so buoyancy ~= weight for the AUV geometry
+    # above (a solid mass=20kg cylinder, radius=0.25m, length=1.5m has
+    # displaced volume ~0.2945 m^3; at water_density=1000 that gives
+    # ~2886 N of buoyancy at ratio=1.0 -- ~14.7x the AUV's 196 N weight,
+    # which would shoot it straight to the surface). ratio = weight /
+    # (water_density * |gravity| * volume) = 196 / 2886.34 ~= 0.068.
+    # RECOMPUTE this if you change auv.mass / auv.length / auv.radius.
+    buoyancy_ratio: 0.068
+    linear_drag: 2.0
+    angular_drag: 0.5
+
+  energy:
+    battery_capacity: 100000.0
+    thrust_coefficient: 1.0
+
+  controller:
+    type: "adaptive P"      # adaptive (gain-scheduled + self-tuning) proportional controller; with
+                            # adaptive.enabled: false it is exactly the plain P controller
+    kp_position: 1.0
+    kp_yaw: 1.0
+    max_thrust: 10.0         # N
+    max_yaw_torque: 2.0      # N*m
+    waypoint_tolerance: 0.5  # m -- intermediate waypoints are considered reached inside this radius
+    # The FINAL waypoint is the goal: the mission only ends once the vehicle is really ON the configured goal
+    # (goal_tolerance), so the end of the run matches the goal x/y/z the operator typed instead of stopping
+    # anywhere inside the 0.5 m waypoint radius. The settle phase is bounded: after goal_settle_timeout_s of
+    # simulated time the run completes anyway (still within waypoint_tolerance), so a vehicle that cannot creep
+    # any closer is not reported as a failure.
+    goal_tolerance: 0.05         # m
+    goal_settle_timeout_s: 60.0  # simulated seconds
+    # The terminal approach additionally uses velocity feedback (N per m/s) plus a feed-forward vertical trim that
+    # cancels the (deliberately) slightly positive buoyancy, so the vehicle settles ON the goal instead of hunting
+    # around it. Mid-mission waypoint following stays P-only.
+    kd_velocity: 7.0             # N per m/s
+    # Week 9: the ADAPTIVE proportional controller (src/simulation/adaptive_controller.py). It keeps the exact P law
+    # far from the target and re-shapes only the proportional gain: a schedule raises it near the set-point, and a
+    # bounded self-tuning term raises it while the vehicle is stalled and relaxes it while it tracks well. Required
+    # for the AUV to settle ON the goal instead of stopping short against drag / positive buoyancy.
+    adaptive:
+      enabled: true
+      near_m: 1.0                # gain schedule: at/below this horizontal error the gain is at its maximum
+      far_m: 6.0                 # ... at/above this error the nominal gain is used (mid-mission P law unchanged)
+      gain_boost: 3.0            # max multiplier on kp_position (schedule AND self-tuning share this cap)
+      adapt_rate_per_s: 0.6      # gain units/s added while stalled
+      relax_rate_per_s: 1.5      # gain units/s removed while tracking well
+      stall_progress_mps: 0.02   # closing speed below this counts as stalled -> gain ramps up
+      healthy_progress_mps: 0.15 # closing speed at/above this counts as tracking well -> gain relaxes
+      settle_deadband_m: 0.05    # inside this error the gain relaxes (nothing left to push)
+      target_change_jump_m: 5.0  # an error jump larger than this is a NEW target: re-seed, do not adapt on it
+      yaw_near_rad: 0.25         # heading gain: nominal at/below this error
+      yaw_far_rad: 1.2           # ... floored at yaw_gain_min for large heading errors (no spin while closing)
+      yaw_gain_min: 0.5
+
+  sensors:
+    max_range: 10.0          # m -- front/left/right ray-cast proximity sensors (STEP 8)
+
+  # ---- Phase 2: simplified 6-DOF dynamics (opt-in) ------------------------
+  # model: "legacy" keeps the original behaviour (world-frame commands, linear
+  # drag, no thruster layer). "6dof" switches AUV.apply_control to a body-frame
+  # wrench -> thruster allocation -> thruster lag/faults -> 6-DOF hydrodynamics
+  # pipeline. All coefficients below are ILLUSTRATIVE, not identified from a real
+  # vehicle; this is a simplified model, not high-fidelity hydrodynamics.
+  dynamics:
+    model: "legacy"                       # "legacy" | "6dof"
+    buoyancy:
+      trim_n: 0.0                         # extra net buoyancy, N (+ = floats up)
+      cob_offset_m: [0.0, 0.0, 0.03]      # centre of buoyancy relative to CoG (body frame);
+                                          # +z = above CoG -> passive roll/pitch stability
+    added_mass_enabled: true
+    added_mass_diag: [2.0, 10.0, 10.0, 0.1, 2.0, 2.0]   # kg x3, kg*m^2 x3 (scaled to the 20 kg model body)
+    drag:
+      linear:    [2.0, 2.0, 2.0, 0.5, 0.5, 0.5]         # == legacy linear_drag / angular_drag
+      quadratic: [12.0, 150.0, 150.0, 0.2, 1.0, 1.0]    # N s^2/m^2 (x3), N m s^2/rad^2 (x3)
+
+  # Logical thrusters (the URDF has no thruster links). Default layout: 2 aft
+  # horizontal, 2 vertical, 2 lateral. Override with an explicit `units:` list.
+  thrusters:
+    max_thrust: 30.0         # N per thruster
+    time_constant: 0.1       # s, first-order response lag
+    noise_std: 0.0           # fraction of commanded thrust (1-sigma); 0 = deterministic
+    seed: 42
+
+  # Water velocity (world frame, m/s). Phase 2: uniform and constant only.
+  current:
+    base: [0.0, 0.0, 0.0]
+
+# -----------------------------------------------------------------------------
+# PHASE 5: GLOBAL PATH PLANNING (src/planning/*). Replaces the Week-6 placeholder keys (connectivity /
+# heuristic / allow_diagonal keep their names; their defaults changed from 4-connected+manhattan to
+# 8-connected+octile because the planner now works on the 0.25 m online cost map).
+# A* runs on the CURRENT online cost map (mapping.*), from the EKF ESTIMATED position. Never ground truth.
+# -----------------------------------------------------------------------------
+planning:
+  connectivity: 8          # 4 | 8 (8-connected moves never cut corners)
+  heuristic: "octile"      # octile | euclidean | manhattan (manhattan is only admissible with connectivity 4)
+  allow_diagonal: true
+  heuristic_weight: 1.0    # 1.0 = optimal for the cost model
+  unknown_policy: "inherit"   # inherit = mapping.costs.unknown_policy | allow = unknown cells traversable | block = never plan through unknown
+  unknown_cost: null       # null = use the cost-map value (mapping.costs.unknown); a number overrides the per-cell cost of UNKNOWN cells
+  # Planner keep-out = mapped inflation (vehicle_radius_m 0.35 + safety 0.25 = 0.6 m) + extra_clearance_m = 1.8 m from an obstacle.
+  # The mapped footprint is a 0.35 m CIRCLE but the hull is 1.5 m x 0.5 m and yaws freely: its circumscribed radius is 0.79 m, plus
+  # ~0.25 m safety and ~0.75 m for EKF drift / tracking error. With 0.5 the planner routed the 1.5 m hull through ~3 m wide
+  # corridors (real PyBullet: hundreds of contact steps). Planner layer only: the Phase-4 map/cost-map is unchanged.
+  extra_clearance_m: 1.2
+  start_snap_radius_m: 1.5 # start cell not traversable (e.g. estimate inside a freshly inflated obstacle) -> nearest traversable cell within this
+  goal_snap_radius_m: 0.0  # 0: a goal in a blocked cell is a planning failure (the goal is never silently moved)
+  max_expansions: 600000
+  smoothing:
+    enabled: true          # collision-safe line-of-sight shortcutting (cost-aware); the result is re-verified
+
+# -----------------------------------------------------------------------------
+# PHASE 5: AUTONOMOUS NAVIGATION (src/planning/navigator.py, path_follower.py, local_avoidance.py, replanning.py)
+# enabled: false keeps the Phase-4 waypoint demo (true-state P controller) bit-for-bit.
+# enabled: true  -> sensors -> EKF -> map -> A* -> path following -> avoidance/replanning, EKF-only.
+# All numbers are simulation parameters (illustrative), not calibrated for a real vehicle.
+# -----------------------------------------------------------------------------
+navigation:
+  enabled: false
+  auto_start: true                 # plan to the goal from t = 0 (false: wait for POST /api/navigation/start)
+  goal_position: null              # [x, y, z]; null -> simulation.goal_position. NOT used by the world generator.
+  goal_tolerance_m: 0.5            # |ESTIMATED position - goal| below this -> GOAL_REACHED
+  goal_speed_tolerance_mps: 0.15  # |ESTIMATED velocity| must also be below this (null disables)
+  validate_interval_s: 0.4         # path validity is re-checked only when the map changed, at most this often
+  min_replan_interval_s: 1.0       # replans are rate limited
+  max_replans: 40
+  max_plan_failures: 4             # consecutive failed planning attempts -> FAILED
+  plan_retry_interval_s: 1.5
+  cost_increase_ratio: 0.75        # "significant map change": remaining-path cost grew by > this fraction ...
+  cost_increase_min: 30.0          # ... and by at least this many cost-metres
+  path_check_horizon_m: 40.0
+  avoid_trigger_distance_m: 7.0    # blockage nearer than this (along the path) -> local detour; farther -> global replan
+  local_window_m: 14.0
+  rejoin_margin_m: 1.0
+  rejoin_step_m: 1.0
+  rejoin_candidates: 10
+  rejoin_clear_horizon_m: 6.0
+  rejoin_tolerance_m: 0.8
+  max_avoid_retries: 3
+  avoid_timeout_s: 60.0
+  sonar_cone_deg: 12.0             # forward cone for the reactive sonar clearance (speed limiting)
+  sonar_slow_range_m: 3.5          # below this forward clearance the speed is scaled down (linearly) ...
+  sonar_stop_range_m: 0.9          # ... to sonar_min_scale; at/below this range the vehicle holds
+  sonar_min_scale: 0.35            # floor: a planned detour legitimately passes closer than the slow range
+  stuck_timeout_s: 25.0
+  stuck_min_progress_m: 0.4
+  max_mission_time_s: 600.0
+  estimate_timeout_s: 2.0
+  linger_after_terminal_s: 2.0     # the run keeps going this long (sim s) after GOAL_REACHED / FAILED; large => stay alive for interactive goal changes
+  follower:
+    cruise_speed_mps: 0.9
+    min_speed_mps: 0.12
+    lookahead_min_m: 1.0
+    lookahead_gain_s: 1.0
+    goal_slowdown_gain: 0.3          # v <= gain * remaining distance: brake early so the vehicle stops at the goal
+    station_kp: 0.4                  # GOAL_REACHED station keeping on the ESTIMATE
+    station_max_speed_mps: 0.3
+    station_deadband_m: 0.1
+    kv: 22.0                       # N per (m/s)
+    kp_yaw: 1.6                    # yaw PD (the hull's Izz is 4.06 kg m^2, so kd is large)
+    kd_yaw: 4.8
+    kp_depth: 0.8
+    ki_depth: 0.15
+    heading_slow_start_rad: 0.5    # slow down while the heading lags so the forward sonar sees where the vehicle goes
+    heading_slow_end_rad: 1.2
+    heading_min_speed_frac: 0.25
+
+# -----------------------------------------------------------------------------
+# FUTURE MODULES (NOT implemented in Weeks 1-6 — placeholders only)
+# -----------------------------------------------------------------------------
+future:
+  reinforcement_learning: false
+  mpc_controller: false
+  llm_integration: false
+  streamlit_dashboard: false
+
+# -----------------------------------------------------------------------------
+# PHASE 3: SENSOR SIMULATION  (top-level; independent of simulation.sensors, which
+# is the legacy 3-ray proximity sensor and is left untouched)
+# -----------------------------------------------------------------------------
+# All values are ILLUSTRATIVE SIMULATION PARAMETERS, not calibrated specifications
+# of any real IMU / DVL / pressure sensor / sonar. Noise stds are PER SAMPLE.
+# Frames: world +Z up (depth = -z); body/sensor X forward, Y left, Z up.
+sensors:
+  enabled: true                    # false -> no sensors, no EKF, Phase-2 behaviour exactly
+  imu:
+    enabled: true                  # sampled every simulation step (rate_hz = 1/time_step)
+    accel_noise_std: 0.05          # m/s^2
+    gyro_noise_std: 0.005          # rad/s
+    accel_bias: [0.02, -0.02, 0.01]       # m/s^2 initial bias
+    gyro_bias: [0.001, -0.001, 0.0005]    # rad/s initial bias
+    accel_bias_walk_std: 0.0001    # m/s^2 / sqrt(s)  (random-walk drift)
+    gyro_bias_walk_std: 0.00001    # rad/s / sqrt(s)
+    degraded_noise_scale: 5.0
+    seed: 42
+  dvl:
+    enabled: true
+    rate_hz: 10.0
+    noise_std: 0.02                # m/s per axis
+    scale_error: 0.0
+    dropout_probability: 0.02
+    min_altitude_m: 0.3            # bottom-lock validity window (altitude above seabed)
+    max_altitude_m: 30.0
+    degraded_noise_scale: 4.0
+    seed: 43
+  depth:
+    enabled: true
+    rate_hz: 10.0
+    noise_std: 0.02                # m
+    bias: 0.0                      # m
+    dropout_probability: 0.01
+    degraded_noise_scale: 5.0
+    seed: 44
+  compass:
+    enabled: true                  # absolute heading reference; false -> yaw is gyro dead reckoning and drifts
+    rate_hz: 5.0
+    noise_std: 0.02                # rad per sample (~1.1 deg)
+    bias: 0.005                    # rad constant residual bias (NOT known to the EKF)
+    dropout_probability: 0.02
+    degraded_noise_scale: 5.0
+    seed: 46
+  sonar:
+    enabled: true                  # needs PyBullet (real ray casting)
+    rate_hz: 5.0
+    horizontal_fov_deg: 90.0
+    vertical_fov_deg: 30.0
+    horizontal_rays: 21
+    vertical_rays: 5
+    max_range_m: 30.0
+    min_range_m: 0.2
+    range_noise_std_m: 0.05
+    dropout_probability: 0.05      # per ray
+    detection_probability: 0.98    # per ray, given a geometric hit
+    mount_position_m: [0.8, 0.0, 0.0]   # body frame, just ahead of the 0.75 m nose
+    mount_rpy_deg: [0.0, 0.0, 0.0]
+    seed: 45
+
+# -----------------------------------------------------------------------------
+# PHASE 3: EKF STATE ESTIMATION (error-state EKF, 15 states). See docs/localization.md.
+# The controller still uses TRUE state in Phase 3; the EKF only runs alongside.
+# -----------------------------------------------------------------------------
+ekf:
+  enabled: true
+  accel_noise_std: 0.05            # process noise (matched to IMU per-sample std by default)
+  gyro_noise_std: 0.005
+  accel_bias_walk_std: 0.0001
+  gyro_bias_walk_std: 0.00001
+  dvl_noise_std: 0.02              # measurement noise
+  depth_noise_std: 0.02
+  compass_noise_std: 0.02          # rad (matches sensors.compass.noise_std)
+  degraded_r_scale: 16.0
+  init_position_std: 0.5           # initial covariance (1-sigma)
+  init_velocity_std: 0.1
+  init_attitude_std: 0.05
+  init_accel_bias_std: 0.05
+  init_gyro_bias_std: 0.005
+  gate_enabled: true               # chi-square (99.9%) innovation gate
+
+# -----------------------------------------------------------------------------
+# PHASE 4: DASHBOARD (dashboard/*). Rates are wall-clock; they only throttle what is PUBLISHED.
+# -----------------------------------------------------------------------------
+dashboard:
+  state_publish_hz: 10.0           # simulation process -> dashboard state snapshot
+  map_publish_hz: 2.0              # occupancy / cost-map payloads (only re-sent when the map changed)
+  telemetry_timeout_s: 3.0         # no fresh snapshot for this long while RUNNING -> STALE
+  headless: true                   # true: PyBullet DIRECT (no window). false: the 3-D PyBullet GUI window opens
+                                   # (dashboard 'Next start -> 3D window', or `python run_visual_demo.py`)
+  auto_open_3d: false              # true: every started run also opens a live 3-D view of THAT run (the run's own
+                                   # window, or the live viewer for a headless run). The web console turns this on
+                                   # by default for the Start button; a machine without a display only warns.
+  realtime_factor: 4.0             # dashboard runs are paced to this x real time (0 = as fast as possible)
+
+# -----------------------------------------------------------------------------
+# PHASE 4: 3-D VISUAL MODE (only used when a PyBullet GUI window is open; src/simulation/gui_visuals.py).
+# All overlays show real data: measured sonar ray endpoints, the EKF estimate, the sensor-derived map.
+# -----------------------------------------------------------------------------
+visualization:
+  realtime_factor: 1.0             # GUI pacing: 1.0 = real time (watchable); raise to run faster
+  keep_open_after_run: true        # the live 3-D window stays OPEN on the last frame when the run ends on its own
+                                   # (goal reached / STOPPED / FAILED), so the operator can still look at where the
+                                   # vehicle ended up; close it with its own window button or the dashboard control.
+                                   # false = close it as soon as the run ends (the old behaviour).
+  underwater_theme: true           # rendering of the REAL water: deep-blue background, one light + shadows,
+                                   # the water surface sheet at z = 0 (visual only -- no collision shape, so
+                                   # sonar / physics / mapping are untouched). src/simulation/underwater_look.py
+  camera_follow: true              # third-person follow camera behind/above the AUV (false: free camera, whole-mission overview)
+  camera:                          # follow-camera tuning (src/simulation/gui_camera.py); camera only, no effect on the simulation
+    mode: follow                   # follow | top   (buttons FOLLOW AUV / TOP VIEW / RESET VIEW, keys 1 / 2 / 3, switch it live)
+    orbit_zoom_buttons: false      # side-panel ORBIT LEFT/RIGHT + ZOOM IN/OUT buttons (run_visual_demo.py turns them on)
+    orbit_step_deg: 30.0           # ORBIT LEFT/RIGHT step (keys 4 / 5)
+    zoom_step: 0.75                # ZOOM IN factor (key 6); ZOOM OUT (key 7) divides by it
+    distance_m: 3.8                # camera distance from the aim point (the AUV is 1.5 m long): close enough to read as the subject
+    pitch_deg: -20.0               # negative = looking down
+    look_ahead_m: 0.8              # aim a little ahead of the AUV so the way forward is visible; the AUV stays near centre
+    top_height_m: 18.0             # TOP VIEW height above the AUV
+    heading_tau_s: 0.45            # camera yaw smoothing (sim seconds)
+    min_distance_m: 1.8
+    hard_min_distance_m: 1.0
+    clearance_m: 0.45              # camera radius for the collision probes
+    ground_clearance_m: 0.5        # keep the camera this far above the seabed / obstacles
+    avoid_geometry: true           # ray-test the REAL collision world so terrain/obstacles never hide the AUV
+    update_every_n_steps: 4        # camera cadence (60 Hz at 240 Hz physics); every PyBullet call is a GUI round trip
+    poll_every_n_updates: 6        # button / key polling interval, in camera updates
+    buttons: true                  # side-panel buttons
+    keys: true                     # keys 1 / 2 / 3 (views), 4 / 5 (orbit), 6 / 7 (zoom)
+  show_sonar_rays: true            # red = measured hit, faint blue = valid no-return, dropped rays not drawn
+  show_estimate_marker: true       # yellow sphere at the EKF ESTIMATED position (the AUV body is the true state)
+  show_mapped_obstacles: true      # red points = OCCUPIED cells of the sonar-derived occupancy grid
+  update_every_n_steps: 5          # overlay refresh interval (simulation steps)
+  mapped_update_period_s: 1.0      # how often the mapped-obstacle points are refreshed (simulation seconds)
+  max_mapped_points: 20000
+  free_ray_stride: 6               # draw every n-th no-return ray (declutter; hits are always drawn)
+  show_free_rays: true             # false: draw only measured hits
+  hit_ray_width: 1.5
+  free_ray_width: 1.0
+  highlight_auv: true              # orange hull colour + name tag (rendering only)
+  auv_label: "AURORA AUV"
+  estimate_marker_radius_m: 0.15   # small, so the EKF marker does not hide the AUV when the estimate is good
+  window:                          # 3-D window size at start-up (a wider window gives the side panel room for full button labels)
+    width: 1600
+    height: 900

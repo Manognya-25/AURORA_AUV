@@ -1,0 +1,63 @@
+{
+  "rows": 100,
+  "columns": 100,
+  "resolution": 1.0,
+  "occupancy_values": {
+    "free": 0,
+    "obstacle": 1,
+    "unknown": 2
+  },
+  "obstacle_class_id_source": "terrain classification class 3 (Obstacle)",
+  "safety_inflation_radius_cells": 2,
+  "occupancy_before_inflation": {
+    "free": {
+      "count": 9541,
+      "fraction": 0.9541
+    },
+    "obstacle": {
+      "count": 459,
+      "fraction": 0.0459
+    },
+    "unknown": {
+      "count": 0,
+      "fraction": 0.0
+    }
+  },
+  "occupancy_after_inflation": {
+    "free": {
+      "count": 7401,
+      "fraction": 0.7401
+    },
+    "obstacle": {
+      "count": 2599,
+      "fraction": 0.2599
+    },
+    "unknown": {
+      "count": 0,
+      "fraction": 0.0
+    }
+  },
+  "newly_blocked_cells_from_inflation": 2140,
+  "cost_weights": {
+    "w_depth": 0.2,
+    "w_slope": 0.4,
+    "w_roughness": 0.3,
+    "w_obstacle": 1000000.0,
+    "unknown_cell_cost": 50.0
+  },
+  "cost_stats": {
+    "depth_cost": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "slope_cost": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "roughness_cost": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "total_cost_traversable_max": 0.6180980072007619
+  }
+}

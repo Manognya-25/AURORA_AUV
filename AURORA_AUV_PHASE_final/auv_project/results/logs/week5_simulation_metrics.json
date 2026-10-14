@@ -1,0 +1,30 @@
+{
+  "total_simulation_steps": 781,
+  "simulation_duration_seconds_simulated": 7.8100000000000005,
+  "simulation_wall_time_seconds": 35.28730368614197,
+  "trajectory_length_m": 14.163652836115935,
+  "start_position": [
+    2.0,
+    0.5,
+    -2.0
+  ],
+  "goal_position": [
+    25.0,
+    12.5,
+    -11.0
+  ],
+  "final_position": [
+    11.318545124811866,
+    8.918056585541203,
+    -8.483502348931264
+  ],
+  "final_distance_to_goal_m": 14.364723685265526,
+  "waypoints_reached": 0,
+  "total_waypoints": 1,
+  "goal_reached": false,
+  "collision_count": 0,
+  "movement_effort_proxy": {
+    "value": 20.034286332108948,
+    "note": "NOT a physical energy measurement -- Week 5 has no calibrated thrust/energy model. This is dt * thrust_coefficient * sum(|control components|), integrated over the run, reported only as a relative movement-effort proxy for comparing runs."
+  }
+}

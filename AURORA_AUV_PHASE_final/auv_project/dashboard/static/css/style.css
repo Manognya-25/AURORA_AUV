@@ -1,0 +1,98 @@
+:root{
+  --paper:#e8edee; --panel:#f6f8f8; --ink:#16232b; --muted:#5c6f79; --rule:#c9d3d7;
+  --sea:#0f3d52; --ok:#1f8a6b; --warn:#b7791f; --bad:#b83a2c; --info:#25708f;
+  --unknown:#44525c; --free:#dcecf1; --occ:#c9402d; --infl:#e99a3d;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; color:var(--ink);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);font-size:14px;line-height:1.4}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1.4rem;padding:.7rem 1.2rem;background:var(--sea);color:#f0f6f8}
+.bar h1{margin:0;font-size:1.15rem;font-weight:600;letter-spacing:.02em}
+.state{padding:.15rem .7rem;border-radius:3px;font-weight:600;font-size:.85rem;background:#6b7c86;color:#fff}
+.s-running{background:var(--ok)} .s-starting,.s-stopping{background:var(--info)} .s-stale,.s-ended_before_goal{background:var(--warn)}
+.s-failed{background:var(--bad)} .s-completed{background:#3b6e8f} .s-stopped,.s-idle{background:#6b7c86}
+.bar-facts{display:flex;gap:1.4rem;margin:0;flex-wrap:wrap}
+.bar-facts div{display:flex;flex-direction:column}
+.bar-facts dt{font-size:.7rem;opacity:.7} .bar-facts dd{margin:0;font-variant-numeric:tabular-nums}
+.banner{flex-basis:100%;background:var(--bad);color:#fff;padding:.4rem .7rem;border-radius:3px;white-space:pre-wrap;font-size:.85rem}
+.banner.warn{background:var(--warn)}
+.banner.info{background:var(--info)}
+.grid{display:grid;gap:.8rem;padding:.8rem;grid-template-columns:minmax(250px,300px) minmax(500px,1.3fr) minmax(300px,1fr);
+  grid-template-areas:"ctl maps nav" "ctl maps sens" "ctl mstat dyn" "ch ch ev" "msn msn ev"}
+.controls{grid-area:ctl}.maps{grid-area:maps}.nav{grid-area:nav}.sensors{grid-area:sens}
+.mapstats{grid-area:mstat}.dyn{grid-area:dyn}.charts{grid-area:ch}.events{grid-area:ev}.msn{grid-area:msn}
+@media (max-width:1100px){.grid{grid-template-columns:1fr;grid-template-areas:"ctl" "maps" "nav" "sens" "mstat" "dyn" "ch" "ev" "msn"}}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:4px;padding:.7rem .9rem;min-width:0}
+h2{font-size:.95rem;margin:.9rem 0 .4rem;font-weight:600} h2:first-child{margin-top:0}
+h2 small{font-weight:400;color:var(--muted);margin-left:.4rem}
+.debug{font-size:.7rem;background:var(--warn);color:#fff;padding:.05rem .35rem;border-radius:2px;margin-left:.4rem;vertical-align:middle}
+.row{display:flex;gap:.4rem;flex-wrap:wrap;margin:.3rem 0}
+button{font:inherit;padding:.4rem .8rem;border:1px solid var(--sea);background:#fff;color:var(--sea);border-radius:3px;cursor:pointer}
+button.primary{background:var(--sea);color:#fff}
+button:hover:not(:disabled){filter:brightness(.94)} button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--info);outline-offset:2px}
+button:disabled{opacity:.4;cursor:not-allowed}
+.field{display:flex;flex-direction:column;gap:.15rem;margin:.45rem 0;font-size:.8rem;color:var(--muted)}
+select,input[type=number]{font:inherit;padding:.3rem;border:1px solid var(--rule);border-radius:3px;background:#fff;color:var(--ink)}
+.note{font-size:.78rem;color:var(--muted);margin:.3rem 0}
+#lastAction.ok{color:var(--ok)} #lastAction.err{color:var(--bad)}
+table{border-collapse:collapse;width:100%}
+.kv td{padding:.12rem 0;border-bottom:1px solid #e3e9eb;font-size:.85rem} .kv td:first-child{color:var(--muted);width:48%}
+.kv td:last-child{font-variant-numeric:tabular-nums;text-align:right}
+.grid-table th,.grid-table td{font-size:.8rem;padding:.2rem .3rem;text-align:left;border-bottom:1px solid #e3e9eb;font-variant-numeric:tabular-nums}
+.grid-table th{color:var(--muted);font-weight:500}
+.faults td{padding:.15rem .2rem;font-size:.82rem;vertical-align:top}
+.faults th{font-size:.72rem;color:var(--muted);font-weight:500;text-align:left;padding:.1rem .2rem;border-bottom:1px solid var(--rule)}
+.faults select{width:100%;min-width:7.5rem}
+.faults .faultsrc{font-size:.72rem;color:var(--muted);white-space:nowrap}
+.faults .faultval{font-size:.72rem;color:var(--muted)}
+.faults .faultval.v-none{color:var(--bad)}
+.faults .faultval.v-frozen{color:var(--warn)}
+/* live sensor readings: failed = the reason in the alert colour (its 0.0 output is the stuck reading), discarded /
+   link cut = the frozen reading in the warning colour, so a value that stopped changing is obvious at a glance */
+.grid-table .v-none{color:var(--bad)}
+.grid-table .v-warn{color:var(--warn)}
+.grid-table .v-frozen{color:var(--warn)}
+#sensorTable{font-size:.76rem}
+#runsTable td,#runsTable th{white-space:nowrap}
+#runsTable tr.baseline td:first-child::before{content:"\2713\00a0";color:var(--ok)}
+#compareTable .delta-pos{color:var(--bad)} #compareTable .delta-neg{color:var(--ok)}
+#missionTable .debug{margin-left:.3rem}
+.pill{padding:.05rem .45rem;border-radius:2px;color:#fff;font-size:.75rem}
+.h-healthy{background:var(--ok)}.h-degraded{background:var(--warn)}.h-failed{background:var(--bad)}.h-none{background:#6b7c86}
+.h-discarded{background:#4c5c66}.h-link_cut{background:#8a5a2b}
+.maphead{display:flex;gap:1rem;align-items:baseline;flex-wrap:wrap}
+.maphead h2{margin-right:auto}.maphead label{font-size:.78rem;color:var(--muted)}
+.mapwrap{display:flex;gap:.7rem;align-items:flex-start;flex-wrap:wrap}
+canvas{max-width:100%;background:#fff;border:1px solid var(--rule);image-rendering:pixelated}
+#occCanvas,#costCanvas{width:min(100%,480px);height:auto;aspect-ratio:1}
+#sonarCanvas{image-rendering:auto;width:100%;height:auto}
+.legend{font-size:.75rem;color:var(--muted)} .legend i{display:inline-block;width:.9rem;height:.9rem;margin-right:.35rem;vertical-align:-2px;border:1px solid #0003}
+.legend div{margin:.15rem 0}
+.thr{display:grid;grid-template-columns:auto 1fr auto auto;gap:.2rem .6rem;font-size:.8rem;align-items:center;font-variant-numeric:tabular-nums}
+.bar-h{height:.6rem;background:#dde5e8;position:relative;border-radius:2px} .bar-h b{position:absolute;top:0;bottom:0;background:var(--info);border-radius:2px}
+#events{margin:0;padding-left:1.1rem;max-height:210px;overflow:auto;font-size:.8rem}
+#events li{margin:.1rem 0} #events .err{color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.state{transition:background .2s}}
+
+.navpanel input[type=number]{width:30%;min-width:0}
+.navpanel .hist{max-height:9em;overflow:auto;font-size:.8em;padding-left:1.2em;margin:.2em 0}
+.navpanel .hist em{color:#5c6f79}
+
+/* ---- live telemetry charts ---- */
+.charts-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.4rem}
+.charts-head h2{margin:0;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.field.inline{flex-direction:row;align-items:center;gap:.5rem;margin:0}
+.live-badge{display:inline-flex;align-items:center;gap:.35rem;padding:.1rem .6rem .1rem .45rem;border-radius:999px;font-size:.72rem;font-weight:700;letter-spacing:.06em;color:#fff;background:#6b7c86}
+.live-badge i{width:.55rem;height:.55rem;border-radius:50%;background:#fff;opacity:.9}
+.lb-live{background:var(--ok)} .lb-stale{background:var(--warn)} .lb-bad{background:var(--bad)} .lb-wait{background:var(--info)} .lb-off{background:#6b7c86}
+.lb-live i{animation:livepulse 1.4s ease-out infinite}
+@keyframes livepulse{0%{box-shadow:0 0 0 0 rgba(255,255,255,.75)}100%{box-shadow:0 0 0 7px rgba(255,255,255,0)}}
+.chartgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:.8rem}
+.chartcard{margin:0;border:1px solid var(--rule);border-radius:4px;background:#fff;padding:.5rem .6rem .45rem;min-width:0}
+.chartcard figcaption{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;margin-bottom:.2rem}
+.chartcard .ct{font-weight:600;font-size:.88rem} .chartcard .ct small{font-weight:400;color:var(--muted);margin-left:.3rem}
+.chartcard .cv{white-space:nowrap;font-variant-numeric:tabular-nums}
+.chartcard output{font-size:1.5rem;font-weight:600;color:var(--sea)} .chartcard .cu{margin-left:.25rem;color:var(--muted);font-size:.85rem}
+.chartcard canvas{display:block;width:100%;height:210px;border:0;background:transparent;image-rendering:auto}
+.cstats{font-size:.74rem;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:.2rem}
+@media (prefers-reduced-motion:reduce){.lb-live i{animation:none}}

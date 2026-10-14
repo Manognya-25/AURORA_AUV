@@ -1,0 +1,19 @@
+{
+  "source": "synthetic",
+  "data_origin_note": "Synthetically generated terrain (not a real surveyed location).",
+  "rows": 100,
+  "columns": 100,
+  "resolution": 1.0,
+  "depth_convention_input": "positive_down",
+  "depth_convention_internal": "positive_down",
+  "interpolation_method": "linear",
+  "validation_report": {
+    "missing_values_found": 0,
+    "infinite_values_found": 0,
+    "outliers_flagged": 0,
+    "valid_cells": 10000
+  },
+  "min_depth": 14.607613353819353,
+  "max_depth": 79.53480544082117,
+  "normalized": false
+}

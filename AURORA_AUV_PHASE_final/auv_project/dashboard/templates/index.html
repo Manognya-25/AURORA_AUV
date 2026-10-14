@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AURORA AUV console</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<header class="bar">
+  <h1>AURORA AUV</h1>
+  <span id="state" class="state s-idle" role="status">IDLE</span>
+  <dl class="bar-facts">
+    <div><dt>Sim time</dt><dd id="simTime">–</dd></div>
+    <div><dt>Dynamics</dt><dd id="dynMode">–</dd></div>
+    <div><dt>Pace</dt><dd id="pace">–</dd></div>
+    <div><dt>Telemetry age</dt><dd id="tAge">–</dd></div>
+    <div><dt>Scenario</dt><dd id="scenario">–</dd></div>
+  </dl>
+  <div id="banner" class="banner" hidden></div>
+</header>
+
+<main class="grid">
+  <!-- ============ CONTROLS ============ -->
+  <section class="panel controls" aria-label="Controls">
+    <h2>Simulation</h2>
+    <div class="row">
+      <button id="btnStart" class="primary">Start</button>
+      <button id="btnStop">Stop</button>
+      <button id="btnReset">Reset</button>
+    </div>
+    <label class="field">Speed (× real time, running sim)
+      <select id="selSpeed"><option value="1">1×</option><option value="4">4×</option><option value="10">10×</option><option value="0">max</option></select>
+    </label>
+    <p class="note" id="lastAction" aria-live="polite">No action yet.</p>
+
+    <h2>Mapping</h2>
+    <div class="row">
+      <button id="btnMapOn">Enable</button><button id="btnMapOff">Disable</button><button id="btnMapReset">Reset map</button>
+    </div>
+    <p class="note">Acts on the running simulation. Reset map returns every cell to unknown.</p>
+
+    <h2>Sensor fault injection</h2>
+    <p class="note">Editable while the simulation is running: a change here is sent to the running robot and applied at
+      once (no stop, no restart). The sensor model really changes its output, and the panels/charts follow it:
+      <b>healthy</b> normal output &middot; <b>degraded</b> samples keep coming but much noisier (still used) &middot;
+      <b>failed</b> a real sample every cycle, but its output is stuck at <b>0.0</b> and never changes (rejected by the
+      EKF) &middot; <b>discarded</b> no output at all, so its readings <b>stop changing</b> (frozen at the last sample)
+      &middot; <b>link cut</b> no data reaches the computer, same effect reported as a link fault. With every sensor
+      discarded / link cut the sensor system delivers nothing and no sensor value is shown anywhere.</p>
+    <table class="faults" id="faultTable"></table>
+    <div class="row"><button id="btnClearFaults" title="Send HEALTHY to every configured sensor, clearing all injected faults">Clear all faults</button></div>
+
+    <h2>Next start</h2>
+    <p class="note">Applied on next simulation start. Changing these does not affect a running simulation — except the
+      3D PyBullet window, which is opened/closed right away for the run that is already going.</p>
+    <label class="field">Environment scenario<select id="selScenario"></select></label>
+    <label class="field">Seed<input id="inSeed" type="number" min="0" step="1" value="42"></label>
+    <label class="field">Obstacle count (procedural scenarios; blank = scenario default)<input id="inCount" type="number" min="0" max="200" step="1" placeholder="default"></label>
+    <p class="note" id="countNote">Exact number of PyBullet obstacle bodies the next run will generate (scenario-fixed structures count towards it).</p>
+    <label class="field">Dynamics model<select id="selDyn"><option value="legacy">legacy</option><option value="6dof">6dof</option></select></label>
+    <label class="field">Mapping at start<select id="selMapStart"><option value="true">enabled</option><option value="false">disabled</option></select></label>
+    <label class="field">3D PyBullet window (needs a display on this computer)
+      <select id="selShow3d"><option value="false">off (headless)</option><option value="true">on (open the 3D window)</option></select>
+    </label>
+    <label class="field inline"><input type="checkbox" id="chkAuto3d" checked> Auto-open the 3-D view for each run that is started</label>
+    <p class="note">When checked, pressing <b>Start</b> automatically reveals the 3-D view of THAT run: a headless
+      run gets the live PyBullet viewer window (same world, same telemetry), a run started with "3D window: on"
+      opens its own window. No new simulation is launched.</p>
+    <p class="note" id="windowNote" aria-live="polite">3-D window: no run.</p>
+    <label class="field">Autonomous navigation (Phase 5)
+      <select id="selNavStart"><option value="false">off (Phase 4 fixed waypoint mission)</option><option value="true">on (EKF-only planner)</option></select></label>
+    <label class="field">Navigation goal x, y, depth (m; positive = below the surface; blank = config goal)
+      <span class="row"><input id="inGoalX" type="number" step="0.5" placeholder="x" aria-label="goal x"><input id="inGoalY" type="number" step="0.5" placeholder="y" aria-label="goal y"><input id="inGoalZ" type="number" step="0.5" placeholder="depth" aria-label="goal depth" title="Depth in metres BELOW the surface (positive down): 7 means 7 m deep. The same number is shown back in Estimated navigation."></span></label>
+    <label class="field">Start position x, y, depth (m; positive = below the surface; blank = config start)
+      <span class="row"><input id="inStartX" type="number" step="0.5" placeholder="x" aria-label="start x"><input id="inStartY" type="number" step="0.5" placeholder="y" aria-label="start y"><input id="inStartZ" type="number" step="0.5" placeholder="depth" aria-label="start depth" title="Depth in metres BELOW the surface (positive down): 1.5 means 1.5 m deep."></span></label>
+    <label class="field">Unknown-cell policy for planning<select id="selPolicyStart"><option value="inherit">inherit (mapping.costs)</option><option value="allow">allow (plan through unknown)</option><option value="block">block (avoid unknown)</option></select></label>
+    <button id="btnApply">Save for next start</button>
+    <button id="btnApplyRestart" title="Save these settings, stop the current run and start a new one with them">Apply &amp; restart now</button>
+    <p class="note" id="pendingNote">Nothing pending.</p>
+  </section>
+
+  <!-- ============ NAVIGATION (Phase 5) ============ -->
+  <section class="panel navpanel" aria-label="Autonomous navigation">
+    <h2>Autonomous navigation <span id="navState" class="state s-idle">–</span></h2>
+    <p class="note" id="navNote">Start a run with "Autonomous navigation: on" (Next start) to enable the planner.</p>
+    <p class="note">Goal x, y and <b>depth</b> in metres below the surface (7 = 7 m deep). The same numbers are echoed in
+      Estimated navigation as <i>goal x, y / goal depth</i>, so the goal that was entered and the goal the vehicle is
+      steering to are read side by side.</p>
+    <div class="row">
+      <input id="goalX" type="number" step="0.5" placeholder="goal x" aria-label="goal x">
+      <input id="goalY" type="number" step="0.5" placeholder="goal y" aria-label="goal y">
+      <input id="goalZ" type="number" step="0.5" placeholder="goal depth" aria-label="goal depth" title="Depth in metres BELOW the surface (positive down).">
+    </div>
+    <div class="row"><button id="btnGoal" class="primary">Set goal</button><button id="btnNavStart">Start navigation</button>
+      <button id="btnNavReplan">Replan now</button><button id="btnNavCancel">Cancel</button></div>
+    <label class="field">Unknown cells (running planner)
+      <select id="selPolicyLive"><option value="inherit">inherit</option><option value="allow">allow</option><option value="block">block</option></select></label>
+    <h2>3-D camera <span class="note">(acts on the PyBullet window of the running simulation)</span></h2>
+    <div class="row" id="camRow">
+      <button data-cam="follow">Follow AUV</button><button data-cam="top">Top view</button><button data-cam="reset">Reset view</button>
+    </div>
+    <div class="row">
+      <button data-cam="orbit_left">⟲ Orbit</button><button data-cam="orbit_right">Orbit ⟳</button>
+      <button data-cam="zoom_in">Zoom +</button><button data-cam="zoom_out">Zoom −</button>
+    </div>
+    <h2>Planner</h2><table class="kv" id="plannerTable"></table>
+    <h2>Following</h2><table class="kv" id="followTable"></table>
+    <h2>Local avoidance</h2><table class="kv" id="avoidTable"></table>
+    <h2>Replanning</h2><table class="kv" id="replanTable"></table>
+    <h2>State history</h2><ol class="hist" id="navHistory"></ol>
+  </section>
+
+  <!-- ============ MAPS ============ -->
+  <section class="panel maps" aria-label="Maps">
+    <div class="maphead">
+      <h2>Occupancy map <small id="occMeta">–</small></h2>
+      <label><input type="checkbox" id="chkRays" checked> sonar rays</label>
+      <label><input type="checkbox" id="chkPath" checked> planned path</label>
+      <label><input type="checkbox" id="chkTruth"> ground truth path <b class="debug">DEBUG ONLY</b></label>
+    </div>
+    <div class="mapwrap"><canvas id="occCanvas" width="480" height="480"></canvas><div class="legend" id="occLegend"></div></div>
+    <div class="maphead"><h2>Navigation cost map <small id="costMeta">–</small></h2></div>
+    <div class="mapwrap"><canvas id="costCanvas" width="480" height="480"></canvas><div class="legend" id="costLegend"></div></div>
+  </section>
+
+  <!-- ============ STATE ============ -->
+  <section class="panel nav" aria-label="Navigation estimate">
+    <h2>Estimated navigation <small>EKF output (operational)</small></h2>
+    <table class="kv" id="navTable"></table>
+    <h2>EKF</h2>
+    <table class="kv" id="ekfTable"></table>
+    <h2>Controller gains <small>read from the controller that is actually driving</small></h2>
+    <p class="note">Read live from whichever controller is producing the commands, nothing computed in the browser.
+      On the legacy Phase-4 mission that is the <b>adaptive P controller</b>: the proportional gain the vehicle is
+      actually using, the gain schedule (which rises near the target) and the self-tuning term (which ramps up while
+      stalled and relaxes while tracking well), each capped by <i>simulation.controller.adaptive.gain_boost</i>, plus
+      the heading loop's gain (full when aligned, floored for large heading errors). With <b>autonomous navigation</b>
+      on the <b>Phase-5 path follower</b> drives instead, and this panel shows its gains in the units they are
+      applied in (velocity, heading and depth loops) together with the speed schedule that shapes the command.
+      <b>Gain tracking</b> below is that controller's own cumulative record: which way it pushed on the last step
+      and why, how much simulated time it spent in each mode, and the tracked peak / mean / slowest values. Both
+      charts below plot these numbers over time.</p>
+    <table class="kv" id="adaptTable"></table>
+    <h2>Gain tracking <small>cumulative for this run, counted in the controller that is driving</small></h2>
+    <table class="kv" id="adaptTrackTable"></table>
+    <h2>Estimate vs ground truth <b class="debug">EVALUATION ONLY</b></h2>
+    <table class="kv" id="truthTable"></table>
+  </section>
+
+  <section class="panel sensors" aria-label="Sensors and sonar">
+    <h2>Sensor health <small>live state, source and current reading</small></h2>
+    <table class="grid-table" id="sensorTable"></table>
+    <h2>Sonar scan <small id="sonarMeta">–</small></h2>
+    <canvas id="sonarCanvas" width="360" height="200"></canvas>
+    <table class="kv" id="sonarTable"></table>
+  </section>
+
+  <section class="panel mapstats" aria-label="Mapping statistics">
+    <h2>Mapping</h2>
+    <table class="kv" id="mapTable"></table>
+    <h2>Cost map</h2>
+    <table class="kv" id="costTable"></table>
+    <h2>Environment <b class="debug">GROUND TRUTH</b></h2>
+    <table class="kv" id="envTable"></table>
+  </section>
+
+  <section class="panel dyn" aria-label="Dynamics and thrusters">
+    <h2>Thrusters &amp; dynamics</h2>
+    <div id="thrusters"></div>
+  </section>
+
+  <section class="panel charts" aria-label="Live telemetry charts">
+    <div class="charts-head">
+      <h2>Live telemetry
+        <span id="liveBadge" class="live-badge lb-off" role="status"><i aria-hidden="true"></i><span id="liveText">NO DATA</span></span>
+        <small id="liveAge"></small></h2>
+      <label class="field inline">Time window
+        <select id="selWindow"><option value="10">10 s</option><option value="30">30 s</option><option value="60" selected>60 s</option><option value="120">120 s</option><option value="300">300 s</option><option value="0">all buffered</option></select>
+      </label>
+      <button id="btnExport" title="Download the telemetry recorded for this run as a CSV file">Export CSV</button>
+    </div>
+    <div class="chartgrid">
+      <figure class="chartcard">
+        <figcaption><span class="ct">Position error, estimate vs truth <b class="debug">EVALUATION ONLY</b></span>
+          <span class="cv"><output id="errNow">–</output><span class="cu">m</span></span></figcaption>
+        <canvas id="errChart" width="520" height="210" role="img" aria-label="Live chart of position error in metres against simulation time"></canvas>
+        <div class="cstats" id="errStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Map coverage <small>cells known</small></span>
+          <span class="cv"><output id="covNow">–</output><span class="cu">%</span></span></figcaption>
+        <canvas id="covChart" width="520" height="210" role="img" aria-label="Live chart of map coverage in percent against simulation time"></canvas>
+        <div class="cstats" id="covStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Goal distance (EKF estimate)</span>
+          <span class="cv"><output id="goalNow">–</output><span class="cu">m</span></span></figcaption>
+        <canvas id="goalChart" width="520" height="210" role="img" aria-label="Live chart of estimated distance to the goal"></canvas>
+        <div class="cstats" id="goalStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Speed (EKF estimate)</span>
+          <span class="cv"><output id="speedNow">–</output><span class="cu">m/s</span></span></figcaption>
+        <canvas id="speedChart" width="520" height="210" role="img" aria-label="Live chart of estimated speed"></canvas>
+        <div class="cstats" id="speedStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Depth (EKF estimate)</span>
+          <span class="cv"><output id="depthNow">–</output><span class="cu">m</span></span></figcaption>
+        <canvas id="depthChart" width="520" height="210" role="img" aria-label="Live chart of estimated depth"></canvas>
+        <div class="cstats" id="depthStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Heading (EKF estimate)</span>
+          <span class="cv"><output id="yawNow">–</output><span class="cu">deg</span></span></figcaption>
+        <canvas id="yawChart" width="520" height="210" role="img" aria-label="Live chart of estimated heading"></canvas>
+        <div class="cstats" id="yawStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Sonar clearance (nearest valid hit)</span>
+          <span class="cv"><output id="clrNow">–</output><span class="cu">m</span></span></figcaption>
+        <canvas id="clrChart" width="520" height="210" role="img" aria-label="Live chart of the nearest valid sonar return"></canvas>
+        <div class="cstats" id="clrStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Replans + avoidance events</span>
+          <span class="cv"><output id="rplNow">–</output><span class="cu">count</span></span></figcaption>
+        <canvas id="rplChart" width="520" height="210" role="img" aria-label="Live chart of cumulative replans and avoidance events"></canvas>
+        <div class="cstats" id="rplStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Roll angle <small>EKF estimate</small></span>
+          <span class="cv"><output id="rollNow">–</output><span class="cu">deg</span></span></figcaption>
+        <canvas id="rollChart" width="520" height="210" role="img" aria-label="Live chart of the estimated roll angle in degrees against simulation time"></canvas>
+        <div class="cstats" id="rollStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Pitch angle <small>EKF estimate</small></span>
+          <span class="cv"><output id="pitchNow">–</output><span class="cu">deg</span></span></figcaption>
+        <canvas id="pitchChart" width="520" height="210" role="img" aria-label="Live chart of the estimated pitch angle in degrees against simulation time"></canvas>
+        <div class="cstats" id="pitchStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Estimated X-position <small>EKF, world frame</small></span>
+          <span class="cv"><output id="estXNow">–</output><span class="cu">m</span></span></figcaption>
+        <canvas id="estXChart" width="520" height="210" role="img" aria-label="Live chart of the estimated X position in metres against simulation time"></canvas>
+        <div class="cstats" id="estXStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Estimated Y-position <small>EKF, world frame</small></span>
+          <span class="cv"><output id="estYNow">–</output><span class="cu">m</span></span></figcaption>
+        <canvas id="estYChart" width="520" height="210" role="img" aria-label="Live chart of the estimated Y position in metres against simulation time"></canvas>
+        <div class="cstats" id="estYStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Estimated vertical position <small>EKF, Z up</small></span>
+          <span class="cv"><output id="estZNow">–</output><span class="cu">m</span></span></figcaption>
+        <canvas id="estZChart" width="520" height="210" role="img" aria-label="Live chart of the estimated vertical position Z in metres against simulation time"></canvas>
+        <div class="cstats" id="estZStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Velocity components <small>EKF estimate, world X / Y / Z</small></span>
+          <span class="cv"><output id="velNow">–</output><span class="cu">m/s</span></span></figcaption>
+        <canvas id="velChart" width="520" height="210" role="img" aria-label="Live chart of the estimated velocity components in metres per second against simulation time"></canvas>
+        <div class="cstats" id="velStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">IMU acceleration <small>accelerometer, specific force, body X / Y / Z</small></span>
+          <span class="cv"><output id="imuAccNow">–</output><span class="cu">m/s²</span></span></figcaption>
+        <canvas id="imuAccChart" width="520" height="210" role="img" aria-label="Live chart of the measured IMU accelerometer specific force components in metres per second squared against simulation time"></canvas>
+        <div class="cstats" id="imuAccStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Angular velocity <small>EKF estimate, body X / Y / Z</small></span>
+          <span class="cv"><output id="angVelNow">–</output><span class="cu">rad/s</span></span></figcaption>
+        <canvas id="angVelChart" width="520" height="210" role="img" aria-label="Live chart of the estimated body angular velocity components in radians per second against simulation time"></canvas>
+        <div class="cstats" id="angVelStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Sensor health status <small>per sensor, from telemetry</small></span>
+          <span class="cv"><output id="healthNow">–</output><span class="cu">state</span></span></figcaption>
+        <canvas id="healthChart" width="520" height="210" role="img" aria-label="Live chart of each sensor's health state over simulation time"></canvas>
+        <div class="cstats" id="healthStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Thruster outputs <small>actual thrust per thruster after lag, noise and faults</small></span>
+          <span class="cv"><output id="thrustNow">–</output><span class="cu">N</span></span></figcaption>
+        <canvas id="thrustChart" width="520" height="210" role="img" aria-label="Live chart of the actual thruster forces in newtons against simulation time"></canvas>
+        <div class="cstats" id="thrustStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Gain multipliers <small id="adaptChartNote">adaptive P controller: gain schedule, self-tuning, active and yaw gain</small></span>
+          <span class="cv"><output id="adaptNow">–</output><span class="cu">×</span></span></figcaption>
+        <canvas id="adaptChart" width="520" height="210" role="img" aria-label="Live chart of the adaptive proportional controller's gain multipliers against simulation time"></canvas>
+        <div class="cstats" id="adaptStats">–</div>
+      </figure>
+      <figure class="chartcard">
+        <figcaption><span class="ct">Tracked gain history <small id="adaptTrackNote">adaptive P controller: ramping, boosted and at the gain cap</small></span>
+          <span class="cv"><output id="adaptTrackNow">–</output><span class="cu">s</span></span></figcaption>
+        <canvas id="adaptTrackChart" width="520" height="210" role="img" aria-label="Live chart of the cumulative simulated time the adaptive controller spent ramping the gain, driving boosted and sitting at the gain cap"></canvas>
+        <div class="cstats" id="adaptTrackStats">–</div>
+      </figure>
+    </div>
+    <p class="note">Dashed vertical lines mark real navigator events (state changes, replans, avoidance) and adaptive
+      gain episodes (the self-tuning starting to ramp, reaching the gain cap and relaxing back) reported in the telemetry.</p>
+  </section>
+
+  <section class="panel events" aria-label="Events">
+    <h2>Events &amp; alerts <small>sensor faults, navigation, mission status</small></h2>
+    <ol id="events"></ol>
+  </section>
+
+  <!-- ============ MISSION STATISTICS + RUN COMPARISON ============ -->
+  <section class="panel msn" aria-label="Mission statistics and run comparison">
+    <h2>Mission statistics <small>live values of the current run; truth-based rows are evaluation only</small></h2>
+    <table class="kv" id="missionTable"></table>
+    <h2>Runs <button id="btnRunRefresh" title="Reload the run history from the backend">Refresh</button></h2>
+    <p class="note">Every finished run keeps its mission statistics and the sensor faults it experienced, so a baseline run can be compared with a fault run.</p>
+    <div class="row">
+      <label class="field inline">Baseline A<select id="selRunA"></select></label>
+      <label class="field inline">Comparison B<select id="selRunB"></select></label>
+    </div>
+    <table class="grid-table" id="runsTable"></table>
+    <h2>Comparison <small>A vs B</small></h2>
+    <table class="kv" id="compareTable"></table>
+  </section>
+</main>
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

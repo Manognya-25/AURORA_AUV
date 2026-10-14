@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<!--
+  auv.urdf
+
+  Simplified single-rigid-body underwater vehicle model for Week 5.
+
+  Geometry: a single cylinder link approximating an AUV hull (the
+  "capsule or cylinder" called for in the Week 5 spec). A plain cylinder
+  is used because standard URDF has no native capsule primitive; rounded
+  end-caps would require a mesh, which is unnecessary detail here.
+
+  This is NOT a model of any specific commercial AUV. Dimensions and
+  mass are simplified, illustrative values. They match
+  configs/config.yaml -> simulation.auv (mass=20.0 kg, length=1.5 m,
+  radius=0.25 m). URDF cannot read the YAML config, so if you change one
+  of those three values, update this file's mass/cylinder/inertia values
+  to match, or the physical body PyBullet loads will silently disagree
+  with what physics.py assumes.
+
+  Orientation: the cylinder's local geometry axis is Z; it is rotated
+  90 degrees about Y (rpy="0 1.5708 0") so its long axis lies along the
+  link's (and therefore the AUV's) local X axis. This makes body-frame
+  "forward" thrust (see src/simulation/auv.py: apply_control) point along
+  the vehicle's long axis, as expected for a torpedo-shaped AUV.
+
+  Inertia (solid cylinder, mass m=20 kg, radius r=0.25 m, length L=1.5 m),
+  expressed in the LINK frame (X = long/roll axis, Y/Z = pitch/yaw axes):
+    Ixx (roll, about the long axis)  = m*r^2/2         = 0.625
+    Iyy = Izz (pitch/yaw)            = m*(3r^2+L^2)/12 = 4.0625
+-->
+<robot name="auv">
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="20.0"/>
+      <inertia ixx="0.625"  ixy="0.0" ixz="0.0"
+               iyy="4.0625" iyz="0.0"
+               izz="4.0625"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.25" length="1.5"/>
+      </geometry>
+      <material name="auv_yellow">
+        <color rgba="0.95 0.75 0.1 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.25" length="1.5"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

@@ -1,0 +1,69 @@
+{
+  "final_navigation_state": "GOAL_REACHED",
+  "failure_reason": null,
+  "goal": [
+    35.0,
+    28.0,
+    -5.0
+  ],
+  "goal_distance_estimate_m": 0.2044707302311331,
+  "goal_distance_TRUE_evaluation_m": 0.2397826777061155,
+  "physics_collisions": 0,
+  "plans": 2,
+  "replans": 1,
+  "replan_reasons": {
+    "path_blocked": 1
+  },
+  "avoidance_maneuvers": 0,
+  "last_path_length_m": 39.95633027282133,
+  "mean_planning_time_ms": 99.35609996318817,
+  "state_history": [
+    {
+      "t": 0.0,
+      "from": "IDLE",
+      "to": "PLAN",
+      "reason": "navigation_started"
+    },
+    {
+      "t": 0.0,
+      "from": "PLAN",
+      "to": "FOLLOW_PATH",
+      "reason": "plan_ok"
+    },
+    {
+      "t": 1.21,
+      "from": "FOLLOW_PATH",
+      "to": "REPLAN",
+      "reason": "path_blocked"
+    },
+    {
+      "t": 1.21,
+      "from": "REPLAN",
+      "to": "FOLLOW_PATH",
+      "reason": "replan_ok"
+    },
+    {
+      "t": 49.9,
+      "from": "FOLLOW_PATH",
+      "to": "GOAL_REACHED",
+      "reason": "goal_within_tolerance"
+    }
+  ],
+  "ekf": {
+    "rms_position_error_m": 0.07080990813849135,
+    "final_position_error_m": 0.0902228500151962,
+    "ekf_stats": {
+      "predictions": 5090,
+      "imu_missing": 0,
+      "dvl_updates": 500,
+      "depth_updates": 506,
+      "compass_updates": 250,
+      "rejected_invalid": 19,
+      "rejected_gate": 0,
+      "rejected_stale": 0,
+      "gate_recoveries": 0
+    }
+  },
+  "mapping_updates": 255,
+  "sim_wall_time_s": null
+}
